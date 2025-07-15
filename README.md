@@ -36,8 +36,8 @@ Combine multiple power sensors using Mix custom sensor to estiamte total power u
 3. Press "Mix" button and add desired sensors with "Sum" functions
 
 # NOTE
-1. Power values are presented as Celsius and are divided by 10 as FanControl doesn't support any units other than Celsius/Farenheit, and curves are limited at 200 degrees maximum.
-For example if a AIDA64 reports 1000 w, it will be displayed as 100.0 in FanControl.
+1. **Power values are presented as Celsius and are divided by 10 as FanControl doesn't support any units other than Celsius/Farenheit, and curves are limited at 200 degrees maximum.**
+**For example if a AIDA64 reports 1000 w, it will be displayed as 100.0 in FanControl.**
 
 2. The shared memory interface must remain enabled while PowerReader is running, so AIDA64 has to stay running in the background.
 
