@@ -1,6 +1,6 @@
 # PowerReader
 
-FanControl plugin to read AIDA64 temperature AND power sensors
+FanControl plugin to read AIDA64 **Temperature** and **Power** sensors
 
 ## Features
 - Reads power values from AIDA64
@@ -37,7 +37,7 @@ Combine multiple power sensors using Mix custom sensor to estiamte total power u
 
 # NOTE
 1. **Power values are presented as Celsius and are divided by 10 as FanControl doesn't support any units other than Celsius/Farenheit, and curves are limited at 200 degrees maximum.**
-**For example if a AIDA64 reports 1000 w, it will be displayed as 100.0 in FanControl.**
+**For example if a AIDA64 reports 1000 w, it will be displayed as 100.0 in FanControl. Power sensors are marked with [POWER SENSOR] prefix in the name.**
 
 2. The shared memory interface must remain enabled while PowerReader is running, so AIDA64 has to stay running in the background.
 
