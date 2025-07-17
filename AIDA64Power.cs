@@ -1,18 +1,19 @@
 ﻿using FanControl.Plugins;
 using System.IO.MemoryMappedFiles;
+using System.Runtime.Versioning;
 using System.Text;
 using System.Xml.Linq;
 
 namespace FanControl.AIDA64Power
 {
+    [SupportedOSPlatform("windows")]
     public class AIDA64PowerPlugin : IPlugin2
     {
         private const string SharedMemoryName = "AIDA64_SensorValues";
         private const int MaxBufferSize = 65536;
+        private readonly List<AIDA64PluginSensor> _sensors = [];
 
         public string Name => "AIDA64 Power";
-
-        private readonly List<AIDA64PluginSensor> _sensors = new();
 
         public void Initialize() { }
 
@@ -20,49 +21,53 @@ namespace FanControl.AIDA64Power
 
         public void Load(IPluginSensorsContainer container)
         {
-            var sensors = LoadAIDA64Sensors();
-            if (sensors == null) return;
-
-            foreach (var sensor in sensors)
+            try
             {
-                AddSensor(container, sensor);
+                var sensors = LoadAIDA64Sensors();
+                if (sensors == null) return;
+
+                foreach (var sensor in sensors)
+                {
+                    AddSensor(container, sensor);
+                }
+            }
+            catch
+            {
+                throw;
             }
         }
 
         public void Update()
         {
-            var updatedSensors = LoadAIDA64Sensors();
-            if (updatedSensors == null) return;
-
-            foreach (var sensor in _sensors)
+            try
             {
-                foreach (var update in updatedSensors)
+                var updatedSensors = LoadAIDA64Sensors();
+                if (updatedSensors == null) return;
+
+                foreach (var sensor in _sensors)
                 {
-                    if (sensor.Id == GetId(update))
+                    foreach (var updatedSensor in updatedSensors)
                     {
-                        sensor.Update(update);
+                        try
+                        {
+                            if (sensor.Id == updatedSensor.Element("id")?.Value)
+                                continue;
+
+                            sensor.Update(GetValue(updatedSensor));
+                        }
+                        catch
+                        {
+                            continue;
+                        }
                     }
                 }
             }
-        }
-
-        private static string GetId(XElement sensor)
-        {
-            return sensor.Element("id")?.Value ?? string.Empty;
-        }
-
-        private void AddSensor(IPluginSensorsContainer container, XElement sensorData)
-        {
-            var sensor = new AIDA64PluginSensor(sensorData);
-
-            if (sensor.SensorType is "temp" or "pwr")
-            {
-                container.TempSensors.Add(sensor);
-                _sensors.Add(sensor);
+            catch
+            { 
+                throw;
             }
         }
-
-        public IEnumerable<XElement>? LoadAIDA64Sensors()
+        public IEnumerable<XElement> LoadAIDA64Sensors()
         {
             try
             {
@@ -70,93 +75,139 @@ namespace FanControl.AIDA64Power
                 using var accessor = mmf.CreateViewAccessor();
 
                 var buffer = ReadSharedMemory(accessor);
-                if (string.IsNullOrWhiteSpace(buffer)) return null;
+                if (string.IsNullOrWhiteSpace(buffer)) throw new Exception("Buffer is NULL of Whitespace");
 
                 var wrappedXml = "<root>" + buffer + "</root>";
-                var document = XDocument.Parse(wrappedXml);
+                var document = XDocument.Parse(wrappedXml) ?? throw new AIDACaptureFailedException("Failed to read XML from AIDA64 Shared Memory");
                 return document.Descendants();
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[AIDA64Plugin] Error reading shared memory: {ex.Message}");
-                return null;
+                throw new AIDACaptureFailedException("Failed to read AIDA64 Shared memory pool with error", ex);
             }
+        }
+
+        private void AddSensor(IPluginSensorsContainer container, XElement sensorData)
+        {
+            try
+            {
+                var sensor = new AIDA64PluginSensor(sensorData);
+
+                if (sensor.SensorType is "temp" or "pwr")
+                {
+                    container.TempSensors.Add(sensor);
+                    _sensors.Add(sensor);
+                }
+            }
+            catch
+            {
+                return;
+            }
+            
         }
 
         private string ReadSharedMemory(MemoryMappedViewAccessor accessor)
         {
+            var buffer = new char[MaxBufferSize];
             int offset = 0;
-            var sb = new StringBuilder();
 
             while (offset < MaxBufferSize)
             {
                 byte b = accessor.ReadByte(offset++);
                 if (b == 0) break;
 
-                sb.Append((char)b);
+                buffer[offset -1] = (char)b;
             }
 
-            return sb.ToString();
+            return new string(buffer, 0, offset -1);
+        }
+
+        private float GetValue(XElement sensor)
+        {
+            string? valueString = sensor.Element("value")?.Value;
+
+            if (float.TryParse(valueString, out float result))
+            {
+                return result;
+            }
+
+            throw new AIDACaptureFailedException("xml element doesn't contain element \"value\": " + sensor.ToString());
         }
     }
 
     public class AIDA64PluginSensor : IPluginSensor
     {
-        private XElement _sensorData;
-        private float? _value;
+        private readonly string _sensorType;
+        private readonly string _sensorID;
+        private readonly string _sensorName;
+        private float _sensorValue;
 
         public AIDA64PluginSensor(XElement sensorData)
         {
-            _sensorData = sensorData;
+            _sensorType = sensorData.Name.LocalName;
+            _sensorID = sensorData.Element("id")?.Value ?? throw new AIDACaptureFailedException("Empty sensor ID");
+            _sensorName = _sensorType switch
+            {
+                "temp" => sensorData.Element("label")?.Value ?? "Unknown Temp",
+                "pwr" => "[POWER SENSOR] " + (sensorData.Element("label")?.Value ?? "Unknown Power"),
+                _ => throw new AIDACaptureFailedException("Unsupported sensor type")
+            };
+
+            if (sensorData.Element("value")?.Value is string valueStr &&
+                float.TryParse(valueStr, out float result))
+            {
+                _sensorValue = _sensorType switch
+                {
+                    "temp" => result,
+                    "pwr" => result / 10,
+                    _ => throw new AIDACaptureFailedException("Unsupported sensor type")
+                };
+            }
+            else
+            {
+                throw new AIDACaptureFailedException("Failed to read sensor value");
+            }
         }
 
-        public string SensorType => _sensorData.Name.LocalName;
+        public string SensorType
+        {
+            get { return _sensorType; }
+        }
 
-        public string Id => _sensorData.Element("id")?.Value ?? string.Empty;
+        public string Id
+        {
+            get { return _sensorID; }
+        }
 
         public string Name
         {
-            get
-            {
-                return SensorType switch
-                {
-                    "temp" => _sensorData.Element("label")?.Value ?? "Unknown Temp",
-                    "pwr" => "[POWER SENSOR] " + (_sensorData.Element("label")?.Value ?? "Unknown Power"),
-                    _ => "Unsupported Sensor"
-                };
-            }
+            get { return _sensorName; }
         }
 
         public float? Value
         {
-            get
-            {
-                return SensorType switch
-                {
-                    "temp" => _value,
-                    "pwr" => _value / 10,
-                    _ => 0
-                };
-            }
+            get { return _sensorValue;}
         }
 
-        public void Update()
-        {
-            if (_sensorData.Element("value")?.Value is string valueStr &&
-                float.TryParse(valueStr, out float result))
-            {
-                _value = result;
-            }
-            else
-            {
-                _value = null;
-            }
-        }
+        public void Update() { }
 
-        public void Update(XElement data)
+        public void Update(float newValue)
         {
-            _sensorData = data;
-            Update();
+            _sensorValue = _sensorType switch
+            {
+                "temp" => newValue,
+                "pwr" => newValue / 10,
+                _ => 0,
+            };
         }
+    }
+
+    public class AIDACaptureFailedException : Exception
+    {
+        public AIDACaptureFailedException() : base("Failed to capture AIDA64 Shared memory") { }
+
+        public AIDACaptureFailedException(string message) : base(message) { }
+
+        public AIDACaptureFailedException(string message, Exception? innerException) : base(message, innerException) { }
     }
 }
