@@ -14,6 +14,9 @@
     <Reference Include="FanControl.Plugins">
       <HintPath>Dlls\FanControl.Plugins.dll</HintPath>
     </Reference>
+    <Reference Include="LibreHardwareMonitorLib">
+      <HintPath>Dlls\LibreHardwareMonitorLib.dll</HintPath>
+    </Reference>
   </ItemGroup>
 
 </Project>
